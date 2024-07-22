@@ -1,6 +1,4 @@
-﻿// Copyright (c) Microsoft Corporation. All rights reserved.
-// Licensed under the MIT License.
-using localgen.Helpers;
+﻿using localgen.Helpers;
 using localgen.Models;
 using Microsoft.ML.OnnxRuntimeGenAI;
 using SevenZipExtractor;
@@ -49,7 +47,7 @@ class Program
                     break;
               
                 case "chat":
-                    //GenerateUrl();
+                    await Chat();
                     break; 
                 case "download":
                     await ListModel();
@@ -160,15 +158,15 @@ class Program
             var table = new Table();
 
             // Add some columns
-            table.AddColumn(new TableColumn("No").Centered());
-            table.AddColumn(new TableColumn("Model").Centered());
-            table.AddColumn(new TableColumn("Desc").Centered());
-            table.AddColumn(new TableColumn("Creator").Centered());
+            table.AddColumn(new TableColumn("No").LeftAligned());
+            table.AddColumn(new TableColumn("Model").LeftAligned());
+            table.AddColumn(new TableColumn("Desc").LeftAligned());
+            table.AddColumn(new TableColumn("Creator").LeftAligned());
             var count = 1;
             foreach (var model in AppConstants.ListModels)
             {
                 var storageStr = string.Empty;
-                table.AddRow(count, model.Name, model.Description, model.Creator);
+                table.AddRow(count.ToString(), model.Name, model.Description, model.Creator);
                 count++;
             }
             // Render the table to the console
@@ -200,15 +198,15 @@ class Program
             var table = new Table();
 
             // Add some columns
-            table.AddColumn(new TableColumn("No").Centered());
-            table.AddColumn(new TableColumn("Model").Centered());
-            table.AddColumn(new TableColumn("Desc").Centered());
-            table.AddColumn(new TableColumn("Creator").Centered());
+            table.AddColumn(new TableColumn("No").LeftAligned());
+            table.AddColumn(new TableColumn("Model").LeftAligned());
+            table.AddColumn(new TableColumn("Desc").LeftAligned());
+            table.AddColumn(new TableColumn("Creator").LeftAligned());
             var count = 1;
             foreach (var model in AppConstants.ListModels)
             {
                 var storageStr = string.Empty;
-                table.AddRow(count, model.Name, model.Description, model.Creator);
+                table.AddRow(count.ToString(), model.Name, model.Description, model.Creator);
                 count++;
             }
             // Render the table to the console
@@ -234,51 +232,74 @@ class Program
     }
     async static Task DownloadModel(AIModel selectedModel)
     {
-        var downloadFileUrl = selectedModel.DownloadUrl;
-        var destinationFolder = Path.Combine(AppConstants.ModelFolder, selectedModel.FolderName);
-        if (!Directory.Exists(destinationFolder))
+        try
         {
-            Directory.CreateDirectory(destinationFolder);
-        }
-        var destinationFilePath = Path.Combine(destinationFolder, Path.GetFileName(downloadFileUrl));
-        if (File.Exists(destinationFilePath))
-        {
-            var execute = InputBoolean("Model is already exist, do you want to download and overwrite ?", true);
-            if (!execute)
+            var downloadFileUrl = selectedModel.DownloadUrl;
+            var destinationFolder = Path.Combine(AppConstants.ModelFolder, selectedModel.FolderName);
+            if (!Directory.Exists(destinationFolder))
             {
-                AnsiConsole.Write("Download model cancelled.");
-                return;
+                Directory.CreateDirectory(destinationFolder);
             }
-        }
-        double? progress = 0d;
-        using (var client = new HttpClientDownloadWithProgress(downloadFileUrl, destinationFilePath))
-        {
-            client.ProgressChanged += (totalFileSize, totalBytesDownloaded, progressPercentage) => {
-                progress = progressPercentage;
-                //Console.WriteLine($"{progressPercentage}% ({totalBytesDownloaded}/{totalFileSize})");
-            };
-            AnsiConsole.Progress()
-            .Start(ctx =>
+            var destinationFilePath = Path.Combine(destinationFolder, Path.GetFileName(downloadFileUrl));
+            if (File.Exists(destinationFilePath))
             {
-                // Define tasks
-                var task1 = ctx.AddTask("[green]Download Model[/]");
-            
-                while (!ctx.IsFinished)
+                var execute = InputBoolean("Model is already exist, do you want to download and overwrite ?", true);
+                if (!execute)
                 {
-                    if(progress.HasValue)
-                        task1.Value(progress.Value);                    
+                    AnsiConsole.Write("Download model cancelled.");
+                    return;
                 }
-                AnsiConsole.Write("model has been downloaded.");
-            });
-            await client.StartDownload();
+            }
+            double? progress = 0d;
+            AnsiConsole.Progress()
+                .Start(async ctx =>
+                {
+                    // Define tasks
+                    var task1 = ctx.AddTask("[green]Download Model[/]");
+                    using (var client = new HttpClientDownloadWithProgress(downloadFileUrl, destinationFilePath))
+                    {
+                        client.ProgressChanged += (totalFileSize, totalBytesDownloaded, progressPercentage) => {
+                            progress = progressPercentage;
+                            if (progress.HasValue)
+                                task1.Value(progress.Value);
+                            //Console.WriteLine($"{progressPercentage}% ({totalBytesDownloaded}/{totalFileSize})");
+                        };
+
+                        await client.StartDownload();
+                    }
+                    while (!ctx.IsFinished)
+                    {
+                        Thread.Sleep(1000);
+                    }
+
+
+                });
+            AnsiConsole.MarkupLine("[green]Model has been downloaded.[/]");
+            AnsiConsole.MarkupLine("[yellow]Extracting file..please wait[/]");
+            //extract file..
+            using (ArchiveFile archiveFile = new ArchiveFile(destinationFilePath))
+            {
+                archiveFile.Extract(destinationFolder, true); // extract all
+                                                              //move file above if there is sub folder in model dir
+                var destDir = new DirectoryInfo(destinationFolder);
+                foreach (var folder in destDir.GetDirectories())
+                {
+                    var ParentFolder = Path.Combine(folder.FullName, "..");
+                    foreach (var file in folder.GetFiles())
+                    {
+                        file.MoveTo($@"{ParentFolder}\{file.Name}");
+                    }
+                    folder.Delete();
+                }
+            }
+            AnsiConsole.MarkupLine("[blue]Model extraction completed.[/]");
         }
-        AnsiConsole.WriteLine("extracting file..please wait");
-        //extract file..
-        using (ArchiveFile archiveFile = new ArchiveFile(destinationFilePath))
+        catch (Exception ex)
         {
-            archiveFile.Extract(destinationFolder,true); // extract all
+            AnsiConsole.MarkupLine("[red]Fail to download model:[/]");
+            AnsiConsole.WriteException(ex);
         }
-        AnsiConsole.WriteLine("model extraction completed.");
+       
     }   
     static void Menu()
     {
@@ -290,9 +311,9 @@ class Program
 
         // Add some columns
         table.AddColumn("No");
-        table.AddColumn(new TableColumn("Category").Centered());
-        table.AddColumn(new TableColumn("Command").Centered());
-        table.AddColumn(new TableColumn("Description").Centered());
+        table.AddColumn(new TableColumn("Category").LeftAligned());
+        table.AddColumn(new TableColumn("Command").LeftAligned());
+        table.AddColumn(new TableColumn("Description").LeftAligned());
 
         // Add some rows
         table.AddRow("1", "global", "[green]?[/]", "Help, this Menu");
@@ -317,68 +338,79 @@ public class ChatWithModel
     }
     public void RunChat()
     {
-        string modelPath = Path.Combine(AppConstants.ModelFolder, selectedModel.FolderName);
-        if (!Directory.Exists(modelPath))
+        try
         {
-            AnsiConsole.WriteLine($"Model is not exist, please download model {selectedModel.Name} first!");
-            return;
-        }
-
-        using Model model = new Model(modelPath);
-        using MultiModalProcessor processor = new MultiModalProcessor(model);
-        using var tokenizerStream = processor.CreateStream();
-        var rule = new Rule($"[red]Chat with Model ({selectedModel.Name})[/]");
-        AnsiConsole.Write(rule);
-        AnsiConsole.WriteLine("type 'quit' to exit chat.");
-        while (true)
-        {
-            string imagePath = string.Empty;
-            Images images = null;
-            if (selectedModel.IsVision)
+            string modelPath = Path.Combine(AppConstants.ModelFolder, selectedModel.FolderName);
+            if (!Directory.Exists(modelPath))
             {
-                AnsiConsole.WriteLine("Image Path (leave empty if no image):");
-                imagePath = Console.ReadLine();
-                if (imagePath == String.Empty)
+                AnsiConsole.WriteLine($"Model is not exist, please download model {selectedModel.Name} first!");
+                return;
+            }
+
+            using Model model = new Model(modelPath);
+            using MultiModalProcessor processor = new MultiModalProcessor(model);
+            using var tokenizerStream = processor.CreateStream();
+            var rule = new Rule($"[red]Chat with Model ({selectedModel.Name})[/]");
+            AnsiConsole.Write(rule);
+            AnsiConsole.MarkupLine("[yellow]type 'quit' to exit chat.[/]");
+            while (true)
+            {
+                string imagePath = string.Empty;
+                Images images = null;
+                if (selectedModel.IsVision)
                 {
-                    AnsiConsole.WriteLine("No image provided");
-                }
-                else
-                {
-                    if (!File.Exists(imagePath))
+                    AnsiConsole.Markup("[green]Image Path (leave empty if no image):[/]");
+                    imagePath = Console.ReadLine();
+                    if (imagePath == String.Empty)
                     {
-                        AnsiConsole.WriteException(new Exception( "Image file not found: " + imagePath));
-                    }else
-                        images = Images.Load(imagePath);
+                        AnsiConsole.MarkupLine("[red]No image provided[/]");
+                    }
+                    else
+                    {
+                        if (!File.Exists(imagePath))
+                        {
+                            AnsiConsole.WriteException(new Exception("Image file not found: " + imagePath));
+                        }
+                        else
+                            images = Images.Load(imagePath);
+                    }
                 }
+
+                AnsiConsole.Markup("[green]Prompt:[/]");
+                string text = Console.ReadLine();
+                if (text.Equals("quit", StringComparison.InvariantCultureIgnoreCase)) break;
+                string prompt = "<|user|>\n";
+                if (images != null)
+                {
+                    prompt += "<|image_1|>\n";
+                }
+                prompt += text + "<|end|>\n<|assistant|>\n";
+
+                AnsiConsole.WriteLine("Processing image and prompt...");
+                var inputTensors = processor.ProcessImages(prompt, images);
+
+                AnsiConsole.WriteLine("Generating response...");
+                AnsiConsole.Markup("[yellow]Response:[/]");
+                using GeneratorParams generatorParams = new GeneratorParams(model);
+                generatorParams.SetSearchOption("max_length", 3072);
+                generatorParams.SetInputs(inputTensors);
+
+                using var generator = new Generator(model, generatorParams);
+                while (!generator.IsDone())
+                {
+                    generator.ComputeLogits();
+                    generator.GenerateNextToken();
+                    AnsiConsole.Write(tokenizerStream.Decode(generator.GetSequence(0)[^1]));
+                }
+                AnsiConsole.WriteLine("");
             }
-
-            AnsiConsole.WriteLine("Prompt:");
-            string text = Console.ReadLine();
-            if (text.Equals("quit", StringComparison.InvariantCultureIgnoreCase)) break;
-            string prompt = "<|user|>\n";
-            if (images != null)
-            {
-                prompt += "<|image_1|>\n";
-            }
-            prompt += text + "<|end|>\n<|assistant|>\n";
-
-            AnsiConsole.WriteLine("Processing image and prompt...");
-            var inputTensors = processor.ProcessImages(prompt, images);
-
-            AnsiConsole.WriteLine("Generating response...");
-            using GeneratorParams generatorParams = new GeneratorParams(model);
-            generatorParams.SetSearchOption("max_length", 3072);
-            generatorParams.SetInputs(inputTensors);
-
-            using var generator = new Generator(model, generatorParams);
-            while (!generator.IsDone())
-            {
-                generator.ComputeLogits();
-                generator.GenerateNextToken();
-                AnsiConsole.Write(tokenizerStream.Decode(generator.GetSequence(0)[^1]));
-            }
+            AnsiConsole.MarkupLine("[blue]Exit chat..[/]");
         }
-        AnsiConsole.WriteLine("exit chat..");
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine("[red]Fail to chat with Model:[/]");
+            AnsiConsole.WriteException(ex);
+        }
     }
 
     
